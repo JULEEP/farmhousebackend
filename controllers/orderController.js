@@ -11,6 +11,7 @@ import { BookingSession } from "../models/BookingSession.js";
 import { Vendor } from "../models/vendor.js";
 
 
+
 // ===================================================== 
 // VERIFY SLOT AVAILABILITY - UPDATED
 // ===================================================== 
@@ -173,318 +174,491 @@ export const verifySlotAvailability = async (req, res) => {
 };
 
 
+// // ===================================================== 
+// // CREATE BOOKING - FIXED VERSION
+// // ===================================================== 
+// export const createBooking = async (req, res) => {
+//   const session = await mongoose.startSession();
+  
+//   try {
+//     session.startTransaction();
+
+//     const { userId, farmhouseId, slotId, transactionId } = req.body;
+
+//     console.log("\n========================================");
+//     console.log("💳 CREATE BOOKING - START");
+//     console.log("========================================");
+//     console.log("Request body:", { userId, farmhouseId, slotId, transactionId });
+
+//     // Validate required fields
+//     if (!userId || !farmhouseId || !slotId || !transactionId) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: "userId, farmhouseId, slotId, and transactionId are required"
+//       });
+//     }
+
+//     // ===================================================== 
+//     // STEP 1: FIND ACTIVE BOOKING SESSION
+//     // ===================================================== 
+//     console.log("\n🔍 Looking for active booking session...");
+    
+//     // Find most recent booking session for this user and farmhouse
+//     const bookingSession = await BookingSession.findOne({
+//       userId,
+//       farmhouseId,
+//       slotId,
+//       expiresAt: { $gt: new Date() } // Not expired
+//     }).sort({ createdAt: -1 }); // Get most recent
+
+//     if (!bookingSession) {
+//       console.error("❌ No active booking session found!");
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: "No active booking session found. Please verify slot availability first."
+//       });
+//     }
+
+//     console.log("✅ Found booking session:", bookingSession.sessionId);
+//     console.log("📅 Booking date from session:", bookingSession.date);
+//     console.log("🎯 Slot details:", bookingSession.label, bookingSession.timing);
+
+//     // ===================================================== 
+//     // STEP 2: USE DATE FROM BOOKING SESSION
+//     // ===================================================== 
+//     const bookingDate = bookingSession.date;
+//     const bookingDateForDB = new Date(bookingDate);
+//     bookingDateForDB.setHours(0, 0, 0, 0);
+//     const normalizedBookingDate = bookingDateForDB.toISOString().split('T')[0];
+    
+//     console.log("🎯 Final booking date:", normalizedBookingDate);
+
+//     // ===================================================== 
+//     // STEP 3: VERIFY USER, FARMHOUSE, AND SLOT
+//     // ===================================================== 
+//     const user = await User.findById(userId).session(session);
+//     if (!user) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(404).json({
+//         success: false,
+//         message: "User not found"
+//       });
+//     }
+//     console.log("✅ User found:", user.name);
+
+//     const farmhouse = await Farmhouse.findById(farmhouseId).session(session);
+//     if (!farmhouse) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(404).json({
+//         success: false,
+//         message: "Farmhouse not found"
+//       });
+//     }
+//     console.log("✅ Farmhouse found:", farmhouse.name);
+
+//     const slot = farmhouse.timePrices.find(
+//       slot => slot._id.toString() === slotId
+//     );
+
+//     if (!slot) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(404).json({
+//         success: false,
+//         message: "Slot not found in farmhouse"
+//       });
+//     }
+//     console.log("✅ Slot found:", slot.label, "-", slot.timing);
+
+//     // Verify slot matches session
+//     if (slot.label !== bookingSession.label || slot.timing !== bookingSession.timing) {
+//       console.error("❌ Slot mismatch between session and farmhouse!");
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: "Slot details mismatch. Please verify slot availability again."
+//       });
+//     }
+
+//     // ===================================================== 
+//     // STEP 4: CALCULATE CHECK TIMES
+//     // ===================================================== 
+//     console.log("\n⏰ Calculating check times...");
+//     const { checkIn, checkOut } = calculateCheckTimes(normalizedBookingDate, slot.timing);
+//     console.log("✅ Check-in:", checkIn);
+//     console.log("✅ Check-out:", checkOut);
+
+//     // ===================================================== 
+//     // STEP 5: FIX EXISTING BOOKED SLOTS WITHOUT DATE FIELD
+//     // ===================================================== 
+//     console.log("\n🔧 Ensuring all booked slots have date field...");
+//     for (let i = 0; i < farmhouse.bookedSlots.length; i++) {
+//       const bookedSlot = farmhouse.bookedSlots[i];
+//       if (!bookedSlot.date && bookedSlot.checkIn) {
+//         const slotDate = new Date(bookedSlot.checkIn);
+//         slotDate.setHours(0, 0, 0, 0);
+//         farmhouse.bookedSlots[i].date = slotDate;
+//       }
+//     }
+
+//     // ===================================================== 
+//     // STEP 6: RACE CONDITION CHECK
+//     // ===================================================== 
+//     console.log("\n🔒 Checking for race conditions...");
+    
+//     const slotAlreadyBooked = farmhouse.bookedSlots.some(b => {
+//       try {
+//         if (!b.date) return false;
+
+//         const bookedDateObj = new Date(b.date);
+//         if (isNaN(bookedDateObj.getTime())) return false;
+
+//         bookedDateObj.setHours(0, 0, 0, 0);
+//         const bookedDate = bookedDateObj.toISOString().split('T')[0];
+        
+//         return bookedDate === normalizedBookingDate && 
+//                b.label === slot.label && 
+//                b.timing === slot.timing;
+//       } catch (err) {
+//         return false;
+//       }
+//     });
+
+//     if (slotAlreadyBooked) {
+//       console.error("❌ Slot already booked!");
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: `This ${slot.label} slot (${slot.timing}) is already booked for ${normalizedBookingDate}.`
+//       });
+//     }
+//     console.log("✅ No race condition detected");
+
+//     // ===================================================== 
+//     // STEP 7: GET FEE CONFIGURATION AND CALCULATE AMOUNTS
+//     // ===================================================== 
+//     let feeConfig = await FeeConfig.findOne({ isActive: true }).session(session);
+//     if (!feeConfig) {
+//       feeConfig = await FeeConfig.create([{
+//         cleaningFee: 200,
+//         serviceFee: 100,
+//         taxPercentage: 0,
+//         isActive: true
+//       }], { session });
+//       feeConfig = feeConfig[0];
+//     }
+
+//     const slotPrice = slot.price || 0;
+//     const cleaningFee = feeConfig.cleaningFee || 0;
+//     const serviceFee = feeConfig.serviceFee || 0;
+//     const totalAmount = slotPrice + cleaningFee + serviceFee;
+
+//     console.log("\n🧾 Price breakdown:");
+//     console.log("  Slot price:", slotPrice);
+//     console.log("  Cleaning fee:", cleaningFee);
+//     console.log("  Service fee:", serviceFee);
+//     console.log("  Total amount:", totalAmount);
+
+//     // ===================================================== 
+//     // STEP 8: PAYMENT PROCESSING
+//     // ===================================================== 
+//     console.log("\n💳 Verifying payment...");
+    
+//     let paymentDetails;
+//     try {
+//       paymentDetails = await razorpay.payments.fetch(transactionId);
+//       console.log("Payment status:", paymentDetails.status);
+      
+//       if (paymentDetails.status === 'authorized') {
+//         console.log("🔄 Capturing payment...");
+//         await razorpay.payments.capture(transactionId, paymentDetails.amount, paymentDetails.currency);
+//         paymentDetails = await razorpay.payments.fetch(transactionId);
+//       }
+      
+//       if (paymentDetails.status !== 'captured') {
+//         throw new Error(`Payment status is ${paymentDetails.status}`);
+//       }
+      
+//       console.log("✅ Payment verified and captured");
+//     } catch (paymentErr) {
+//       console.error("❌ Payment verification failed:", paymentErr);
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: `Payment verification failed: ${paymentErr.message}`
+//       });
+//     }
+
+//     // ===================================================== 
+//     // STEP 9: CREATE BOOKING DOCUMENT - FIXED STRUCTURE
+//     // ===================================================== 
+//     console.log("\n📝 Creating booking document...");
+//     const currentDate = new Date();
+    
+//     // CRITICAL FIX: Create booking data according to your schema
+//     const bookingData = {
+//       userId: userId,
+//       farmhouseId: farmhouseId,
+//       transactionId: transactionId,
+//       verificationId: crypto.randomBytes(16).toString('hex'),
+//       razorpayOrderId: paymentDetails.order_id,
+//       razorpayPaymentId: transactionId,
+      
+//       // Booking details (nested object)
+//       bookingDetails: {
+//         date: bookingDateForDB,
+//         label: slot.label,
+//         timing: slot.timing,
+//         checkIn: checkIn,
+//         checkOut: checkOut
+//       },
+      
+//       // CRITICAL: These must be at the top level (required by your schema)
+//       slotPrice: slotPrice, // Top level - required
+//       cleaningFee: cleaningFee, // Top level - required
+//       serviceFee: serviceFee, // Top level - required
+//       totalAmount: totalAmount, // Top level - required
+      
+//       // Status fields
+//       status: 'confirmed',
+//       paymentStatus: 'completed',
+      
+//       createdAt: currentDate,
+//       updatedAt: currentDate
+//     };
+
+//     console.log("📋 Booking data to save:", JSON.stringify(bookingData, null, 2));
+
+//     const booking = await Booking.create([bookingData], { session });
+//     const createdBooking = booking[0];
+//     console.log("✅ Booking document created:", createdBooking._id);
+
+//     // ===================================================== 
+//     // STEP 10: ADD TO FARMHOUSE BOOKED SLOTS
+//     // ===================================================== 
+//     console.log("\n🏠 Adding to farmhouse.bookedSlots...");
+    
+//     const bookedSlotData = {
+//       bookingId: createdBooking._id,
+//       userId: userId,
+//       checkIn: checkIn,
+//       checkOut: checkOut,
+//       date: bookingDateForDB,
+//       label: slot.label,
+//       timing: slot.timing,
+//       bookedAt: currentDate
+//     };
+
+//     farmhouse.bookedSlots.push(bookedSlotData);
+//     console.log("✅ Added to bookedSlots (total:", farmhouse.bookedSlots.length, ")");
+
+//     await farmhouse.save({ session });
+//     console.log("✅ Farmhouse saved successfully");
+
+//     // ===================================================== 
+//     // STEP 11: DELETE BOOKING SESSION
+//     // ===================================================== 
+//     await BookingSession.deleteOne({ sessionId: bookingSession.sessionId });
+//     console.log("✅ Deleted booking session");
+
+//     // Commit transaction
+//     await session.commitTransaction();
+//     session.endSession();
+//     console.log("✅ Transaction committed");
+
+//     console.log("\n========================================");
+//     console.log("✅ BOOKING CREATED SUCCESSFULLY");
+//     console.log("Booking ID:", createdBooking._id);
+//     console.log("Date:", normalizedBookingDate);
+//     console.log("Slot:", slot.label, "-", slot.timing);
+//     console.log("========================================\n");
+
+//     // Return response
+//     res.json({
+//       success: true,
+//       message: "Booking confirmed successfully",
+//       bookingId: createdBooking._id,
+//       bookingDetails: {
+//         bookingId: createdBooking._id,
+//         farmhouseName: farmhouse.name,
+//         slotInfo: {
+//           date: normalizedBookingDate,
+//           label: slot.label,
+//           timing: slot.timing,
+//           checkIn: checkIn,
+//           checkOut: checkOut
+//         },
+//         paymentInfo: {
+//           transactionId: transactionId,
+//           amount: totalAmount,
+//           status: 'captured'
+//         },
+//         bookingStatus: 'confirmed'
+//       }
+//     });
+
+//   } catch (err) {
+//     console.error("\n❌ ERROR IN CREATE BOOKING:");
+//     console.error(err);
+    
+//     if (session.inTransaction()) {
+//       await session.abortTransaction();
+//     }
+//     session.endSession();
+
+//     // Handle specific error types
+//     if (err.name === 'ValidationError') {
+//       console.error("Validation errors:", err.errors);
+//       return res.status(400).json({
+//         success: false,
+//         message: "Validation error in booking data",
+//         errors: Object.keys(err.errors).map(key => ({
+//           field: key,
+//           message: err.errors[key].message
+//         }))
+//       });
+//     }
+
+//     if (err.error && err.error.description) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Payment error: ${err.error.description}`
+//       });
+//     }
+
+//     res.status(500).json({
+//       success: false,
+//       message: "Internal server error while processing booking",
+//       error: process.env.NODE_ENV === 'development' ? err.message : undefined
+//     });
+//   }
+// };
+
+
+
 // ===================================================== 
-// CREATE BOOKING - FIXED VERSION
+// CREATE BOOKING - INITIAL STATUS PENDING ONLY
 // ===================================================== 
 export const createBooking = async (req, res) => {
   const session = await mongoose.startSession();
-  
+
   try {
     session.startTransaction();
 
-    const { userId, farmhouseId, slotId, transactionId } = req.body;
+    const { userId, farmhouseId, slotId } = req.body;
 
-    console.log("\n========================================");
-    console.log("💳 CREATE BOOKING - START");
-    console.log("========================================");
-    console.log("Request body:", { userId, farmhouseId, slotId, transactionId });
-
-    // Validate required fields
-    if (!userId || !farmhouseId || !slotId || !transactionId) {
+    if (!userId || !farmhouseId || !slotId) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
         success: false,
-        message: "userId, farmhouseId, slotId, and transactionId are required"
+        message: "userId, farmhouseId, and slotId are required"
       });
     }
 
-    // ===================================================== 
-    // STEP 1: FIND ACTIVE BOOKING SESSION
-    // ===================================================== 
-    console.log("\n🔍 Looking for active booking session...");
-    
-    // Find most recent booking session for this user and farmhouse
+    // Optional BookingSession
     const bookingSession = await BookingSession.findOne({
       userId,
       farmhouseId,
       slotId,
-      expiresAt: { $gt: new Date() } // Not expired
-    }).sort({ createdAt: -1 }); // Get most recent
+      expiresAt: { $gt: new Date() }
+    }).sort({ createdAt: -1 });
 
-    if (!bookingSession) {
-      console.error("❌ No active booking session found!");
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "No active booking session found. Please verify slot availability first."
-      });
-    }
-
-    console.log("✅ Found booking session:", bookingSession.sessionId);
-    console.log("📅 Booking date from session:", bookingSession.date);
-    console.log("🎯 Slot details:", bookingSession.label, bookingSession.timing);
-
-    // ===================================================== 
-    // STEP 2: USE DATE FROM BOOKING SESSION
-    // ===================================================== 
-    const bookingDate = bookingSession.date;
-    const bookingDateForDB = new Date(bookingDate);
+    const bookingDateForDB = bookingSession ? new Date(bookingSession.date) : new Date();
     bookingDateForDB.setHours(0, 0, 0, 0);
-    const normalizedBookingDate = bookingDateForDB.toISOString().split('T')[0];
-    
-    console.log("🎯 Final booking date:", normalizedBookingDate);
+    const normalizedBookingDate = bookingDateForDB.toISOString().split("T")[0];
 
-    // ===================================================== 
-    // STEP 3: VERIFY USER, FARMHOUSE, AND SLOT
-    // ===================================================== 
     const user = await User.findById(userId).session(session);
-    if (!user) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
-      });
-    }
-    console.log("✅ User found:", user.name);
+    if (!user) throw new Error("User not found");
 
     const farmhouse = await Farmhouse.findById(farmhouseId).session(session);
-    if (!farmhouse) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Farmhouse not found"
-      });
-    }
-    console.log("✅ Farmhouse found:", farmhouse.name);
+    if (!farmhouse) throw new Error("Farmhouse not found");
 
     const slot = farmhouse.timePrices.find(
-      slot => slot._id.toString() === slotId
+      (s) => s._id.toString() === slotId
     );
+    if (!slot) throw new Error("Slot not found");
 
-    if (!slot) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Slot not found in farmhouse"
-      });
-    }
-    console.log("✅ Slot found:", slot.label, "-", slot.timing);
-
-    // Verify slot matches session
-    if (slot.label !== bookingSession.label || slot.timing !== bookingSession.timing) {
-      console.error("❌ Slot mismatch between session and farmhouse!");
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Slot details mismatch. Please verify slot availability again."
-      });
-    }
-
-    // ===================================================== 
-    // STEP 4: CALCULATE CHECK TIMES
-    // ===================================================== 
-    console.log("\n⏰ Calculating check times...");
     const { checkIn, checkOut } = calculateCheckTimes(normalizedBookingDate, slot.timing);
-    console.log("✅ Check-in:", checkIn);
-    console.log("✅ Check-out:", checkOut);
 
-    // ===================================================== 
-    // STEP 5: FIX EXISTING BOOKED SLOTS WITHOUT DATE FIELD
-    // ===================================================== 
-    console.log("\n🔧 Ensuring all booked slots have date field...");
-    for (let i = 0; i < farmhouse.bookedSlots.length; i++) {
-      const bookedSlot = farmhouse.bookedSlots[i];
-      if (!bookedSlot.date && bookedSlot.checkIn) {
-        const slotDate = new Date(bookedSlot.checkIn);
-        slotDate.setHours(0, 0, 0, 0);
-        farmhouse.bookedSlots[i].date = slotDate;
-      }
-    }
-
-    // ===================================================== 
-    // STEP 6: RACE CONDITION CHECK
-    // ===================================================== 
-    console.log("\n🔒 Checking for race conditions...");
-    
-    const slotAlreadyBooked = farmhouse.bookedSlots.some(b => {
-      try {
-        if (!b.date) return false;
-
-        const bookedDateObj = new Date(b.date);
-        if (isNaN(bookedDateObj.getTime())) return false;
-
-        bookedDateObj.setHours(0, 0, 0, 0);
-        const bookedDate = bookedDateObj.toISOString().split('T')[0];
-        
-        return bookedDate === normalizedBookingDate && 
-               b.label === slot.label && 
-               b.timing === slot.timing;
-      } catch (err) {
-        return false;
-      }
-    });
-
-    if (slotAlreadyBooked) {
-      console.error("❌ Slot already booked!");
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: `This ${slot.label} slot (${slot.timing}) is already booked for ${normalizedBookingDate}.`
-      });
-    }
-    console.log("✅ No race condition detected");
-
-    // ===================================================== 
-    // STEP 7: GET FEE CONFIGURATION AND CALCULATE AMOUNTS
-    // ===================================================== 
     let feeConfig = await FeeConfig.findOne({ isActive: true }).session(session);
     if (!feeConfig) {
-      feeConfig = await FeeConfig.create([{
+      feeConfig = (await FeeConfig.create([{
         cleaningFee: 200,
         serviceFee: 100,
-        taxPercentage: 0,
         isActive: true
-      }], { session });
-      feeConfig = feeConfig[0];
+      }], { session }))[0];
     }
 
-    const slotPrice = slot.price || 0;
-    const cleaningFee = feeConfig.cleaningFee || 0;
-    const serviceFee = feeConfig.serviceFee || 0;
-    const totalAmount = slotPrice + cleaningFee + serviceFee;
+    const totalAmount = (slot.price || 0) + (feeConfig.cleaningFee || 0) + (feeConfig.serviceFee || 0);
 
-    console.log("\n🧾 Price breakdown:");
-    console.log("  Slot price:", slotPrice);
-    console.log("  Cleaning fee:", cleaningFee);
-    console.log("  Service fee:", serviceFee);
-    console.log("  Total amount:", totalAmount);
+    // =================== PAYMENT LOGIC ===================
+    // Initial createBooking always sets status pending
+    const advance = 0;
+    const remaining = totalAmount;
+    const complete = false;
+    const paymentStatus = "pending"; // ALWAYS pending until Razorpay confirms
 
-    // ===================================================== 
-    // STEP 8: PAYMENT PROCESSING
-    // ===================================================== 
-    console.log("\n💳 Verifying payment...");
-    
-    let paymentDetails;
-    try {
-      paymentDetails = await razorpay.payments.fetch(transactionId);
-      console.log("Payment status:", paymentDetails.status);
-      
-      if (paymentDetails.status === 'authorized') {
-        console.log("🔄 Capturing payment...");
-        await razorpay.payments.capture(transactionId, paymentDetails.amount, paymentDetails.currency);
-        paymentDetails = await razorpay.payments.fetch(transactionId);
-      }
-      
-      if (paymentDetails.status !== 'captured') {
-        throw new Error(`Payment status is ${paymentDetails.status}`);
-      }
-      
-      console.log("✅ Payment verified and captured");
-    } catch (paymentErr) {
-      console.error("❌ Payment verification failed:", paymentErr);
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: `Payment verification failed: ${paymentErr.message}`
-      });
-    }
-
-    // ===================================================== 
-    // STEP 9: CREATE BOOKING DOCUMENT - FIXED STRUCTURE
-    // ===================================================== 
-    console.log("\n📝 Creating booking document...");
-    const currentDate = new Date();
-    
-    // CRITICAL FIX: Create booking data according to your schema
+    // =================== CREATE BOOKING ===================
     const bookingData = {
-      userId: userId,
-      farmhouseId: farmhouseId,
-      transactionId: transactionId,
-      verificationId: crypto.randomBytes(16).toString('hex'),
-      razorpayOrderId: paymentDetails.order_id,
-      razorpayPaymentId: transactionId,
-      
-      // Booking details (nested object)
+      userId,
+      farmhouseId,
+      razorpayOrderId: null,
+      razorpayPaymentId: null,
       bookingDetails: {
         date: bookingDateForDB,
         label: slot.label,
         timing: slot.timing,
-        checkIn: checkIn,
-        checkOut: checkOut
+        checkIn,
+        checkOut
       },
-      
-      // CRITICAL: These must be at the top level (required by your schema)
-      slotPrice: slotPrice, // Top level - required
-      cleaningFee: cleaningFee, // Top level - required
-      serviceFee: serviceFee, // Top level - required
-      totalAmount: totalAmount, // Top level - required
-      
-      // Status fields
-      status: 'confirmed',
-      paymentStatus: 'completed',
-      
-      createdAt: currentDate,
-      updatedAt: currentDate
+      slotPrice: slot.price,
+      cleaningFee: feeConfig.cleaningFee,
+      serviceFee: feeConfig.serviceFee,
+      totalAmount,
+      advancePayment: advance,
+      remainingAmount: remaining,
+      completePayment: complete,
+      paymentStatus,
+      status: "pending", // ALSO pending
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
-    console.log("📋 Booking data to save:", JSON.stringify(bookingData, null, 2));
+    const [createdBooking] = await Booking.create([bookingData], { session });
 
-    const booking = await Booking.create([bookingData], { session });
-    const createdBooking = booking[0];
-    console.log("✅ Booking document created:", createdBooking._id);
-
-    // ===================================================== 
-    // STEP 10: ADD TO FARMHOUSE BOOKED SLOTS
-    // ===================================================== 
-    console.log("\n🏠 Adding to farmhouse.bookedSlots...");
-    
-    const bookedSlotData = {
+    farmhouse.bookedSlots.push({
       bookingId: createdBooking._id,
-      userId: userId,
-      checkIn: checkIn,
-      checkOut: checkOut,
+      userId,
+      checkIn,
+      checkOut,
       date: bookingDateForDB,
       label: slot.label,
       timing: slot.timing,
-      bookedAt: currentDate
-    };
-
-    farmhouse.bookedSlots.push(bookedSlotData);
-    console.log("✅ Added to bookedSlots (total:", farmhouse.bookedSlots.length, ")");
+      bookedAt: new Date()
+    });
 
     await farmhouse.save({ session });
-    console.log("✅ Farmhouse saved successfully");
 
-    // ===================================================== 
-    // STEP 11: DELETE BOOKING SESSION
-    // ===================================================== 
-    await BookingSession.deleteOne({ sessionId: bookingSession.sessionId });
-    console.log("✅ Deleted booking session");
+    if (bookingSession) {
+      await BookingSession.deleteOne({ sessionId: bookingSession.sessionId });
+    }
 
-    // Commit transaction
     await session.commitTransaction();
     session.endSession();
-    console.log("✅ Transaction committed");
 
-    console.log("\n========================================");
-    console.log("✅ BOOKING CREATED SUCCESSFULLY");
-    console.log("Booking ID:", createdBooking._id);
-    console.log("Date:", normalizedBookingDate);
-    console.log("Slot:", slot.label, "-", slot.timing);
-    console.log("========================================\n");
-
-    // Return response
     res.json({
       success: true,
-      message: "Booking confirmed successfully",
+      message: "Booking created successfully (pending payment)",
       bookingId: createdBooking._id,
       bookingDetails: {
         bookingId: createdBooking._id,
@@ -493,51 +667,25 @@ export const createBooking = async (req, res) => {
           date: normalizedBookingDate,
           label: slot.label,
           timing: slot.timing,
-          checkIn: checkIn,
-          checkOut: checkOut
+          checkIn,
+          checkOut
         },
         paymentInfo: {
-          transactionId: transactionId,
+          transactionId: null,
           amount: totalAmount,
-          status: 'captured'
+          status: paymentStatus
         },
-        bookingStatus: 'confirmed'
+        bookingStatus: "pending"
       }
     });
 
   } catch (err) {
-    console.error("\n❌ ERROR IN CREATE BOOKING:");
-    console.error(err);
-    
-    if (session.inTransaction()) {
-      await session.abortTransaction();
-    }
+    if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
-
-    // Handle specific error types
-    if (err.name === 'ValidationError') {
-      console.error("Validation errors:", err.errors);
-      return res.status(400).json({
-        success: false,
-        message: "Validation error in booking data",
-        errors: Object.keys(err.errors).map(key => ({
-          field: key,
-          message: err.errors[key].message
-        }))
-      });
-    }
-
-    if (err.error && err.error.description) {
-      return res.status(400).json({
-        success: false,
-        message: `Payment error: ${err.error.description}`
-      });
-    }
 
     res.status(500).json({
       success: false,
-      message: "Internal server error while processing booking",
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      message: err.message
     });
   }
 };

@@ -4,38 +4,43 @@ const bookingSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    required: true
   },
   farmhouseId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Farmhouse",
-    required: true
   },
   transactionId: {
     type: String,
-    required: true,
-    unique: true
   },
   verificationId: {
     type: String,
-    required: true
   },
   razorpayOrderId: String,
   razorpayPaymentId: String,
   razorpaySignature: String,
   
   bookingDetails: {
-    date: { type: Date, required: true },
-    label: { type: String, required: true },
-    timing: { type: String, required: true },
-    checkIn: { type: Date, required: true },
-    checkOut: { type: Date, required: true }
+    date: { type: Date, },
+    label: { type: String,  },
+    timing: { type: String,  },
+    checkIn: { type: Date,  },
+    checkOut: { type: Date, }
   },
   
-  slotPrice: { type: Number, required: true },
-  cleaningFee: { type: Number, default: 0, required: true },
-  serviceFee: { type: Number, default: 0, required: true },
-  totalAmount: { type: Number, required: true },
+  slotPrice: { type: Number,  },
+  cleaningFee: { type: Number, default: 0,  },
+  serviceFee: { type: Number, default: 0,  },
+  totalAmount: { type: Number,  },
+
+   // Partial payment support
+  advancePayment: { type: Number, default: 0 },
+  remainingAmount: { type: Number, default: 0 },
+  completePayment: { type: Boolean, default: false },
+  paymentStatus: {
+    type: String,
+    enum: ['pending', 'partial', 'paid', 'failed'],
+    default: 'pending'
+  },
   
   status: {
     type: String,
@@ -43,11 +48,11 @@ const bookingSchema = new mongoose.Schema({
     default: "pending"
   },
   
-  paymentStatus: {
-    type: String,
-    enum: ["pending", "completed", "failed", "refunded"],
-    default: "completed"
-  },
+  // paymentStatus: {
+  //   type: String,
+  //   enum: ["pending", "completed", "failed", "refunded"],
+  //   default: "completed"
+  // },
   
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
