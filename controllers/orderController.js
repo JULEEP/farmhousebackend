@@ -545,16 +545,14 @@ export const verifySlotAvailability = async (req, res) => {
 
 
 
-// ===================================================== 
-// CREATE BOOKING - INITIAL STATUS PENDING ONLY
-// ===================================================== 
 export const createBooking = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
     session.startTransaction();
 
-    const { userId, farmhouseId, slotId } = req.body;
+    // ---------------- DESTRUCTURE INPUT ----------------
+    const { userId, farmhouseId, slotId, advancePayment = 0 } = req.body;
 
     if (!userId || !farmhouseId || !slotId) {
       await session.abortTransaction();
@@ -565,7 +563,7 @@ export const createBooking = async (req, res) => {
       });
     }
 
-    // Optional BookingSession
+    // ---------------- OPTIONAL BOOKING SESSION ----------------
     const bookingSession = await BookingSession.findOne({
       userId,
       farmhouseId,
@@ -577,19 +575,19 @@ export const createBooking = async (req, res) => {
     bookingDateForDB.setHours(0, 0, 0, 0);
     const normalizedBookingDate = bookingDateForDB.toISOString().split("T")[0];
 
+    // ---------------- FETCH USER & FARMHOUSE ----------------
     const user = await User.findById(userId).session(session);
     if (!user) throw new Error("User not found");
 
     const farmhouse = await Farmhouse.findById(farmhouseId).session(session);
     if (!farmhouse) throw new Error("Farmhouse not found");
 
-    const slot = farmhouse.timePrices.find(
-      (s) => s._id.toString() === slotId
-    );
+    const slot = farmhouse.timePrices.find(s => s._id.toString() === slotId);
     if (!slot) throw new Error("Slot not found");
 
     const { checkIn, checkOut } = calculateCheckTimes(normalizedBookingDate, slot.timing);
 
+    // ---------------- FETCH FEES ----------------
     let feeConfig = await FeeConfig.findOne({ isActive: true }).session(session);
     if (!feeConfig) {
       feeConfig = (await FeeConfig.create([{
@@ -601,41 +599,37 @@ export const createBooking = async (req, res) => {
 
     const totalAmount = (slot.price || 0) + (feeConfig.cleaningFee || 0) + (feeConfig.serviceFee || 0);
 
-    // =================== PAYMENT LOGIC ===================
-    // Initial createBooking always sets status pending
-    const advance = 0;
-    const remaining = totalAmount;
-    const complete = false;
-    const paymentStatus = "pending"; // ALWAYS pending until Razorpay confirms
+    // ---------------- PAYMENT LOGIC ----------------
+    const advance = advancePayment; // user ne bheja ya default 0
+    const remaining = advance > 0 ? totalAmount - advance : 0;
 
-    // =================== CREATE BOOKING ===================
+    const paymentStatus = "pending"; // Always pending initially
+    const bookingStatus = "pending"; // Will change only via webhook
+    const completePayment = false; // Not complete until webhook confirms
+
+    // ---------------- CREATE BOOKING ----------------
     const bookingData = {
       userId,
       farmhouseId,
       razorpayOrderId: null,
       razorpayPaymentId: null,
-      bookingDetails: {
-        date: bookingDateForDB,
-        label: slot.label,
-        timing: slot.timing,
-        checkIn,
-        checkOut
-      },
+      bookingDetails: { date: bookingDateForDB, label: slot.label, timing: slot.timing, checkIn, checkOut },
       slotPrice: slot.price,
       cleaningFee: feeConfig.cleaningFee,
       serviceFee: feeConfig.serviceFee,
       totalAmount,
       advancePayment: advance,
       remainingAmount: remaining,
-      completePayment: complete,
+      completePayment,
       paymentStatus,
-      status: "pending", // ALSO pending
+      status: bookingStatus,
       createdAt: new Date(),
       updatedAt: new Date()
     };
 
     const [createdBooking] = await Booking.create([bookingData], { session });
 
+    // ---------------- UPDATE FARMHOUSE ----------------
     farmhouse.bookedSlots.push({
       bookingId: createdBooking._id,
       userId,
@@ -649,6 +643,7 @@ export const createBooking = async (req, res) => {
 
     await farmhouse.save({ session });
 
+    // ---------------- DELETE BOOKING SESSION ----------------
     if (bookingSession) {
       await BookingSession.deleteOne({ sessionId: bookingSession.sessionId });
     }
@@ -656,6 +651,7 @@ export const createBooking = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    // ---------------- RESPONSE ----------------
     res.json({
       success: true,
       message: "Booking created successfully (pending payment)",
@@ -663,30 +659,16 @@ export const createBooking = async (req, res) => {
       bookingDetails: {
         bookingId: createdBooking._id,
         farmhouseName: farmhouse.name,
-        slotInfo: {
-          date: normalizedBookingDate,
-          label: slot.label,
-          timing: slot.timing,
-          checkIn,
-          checkOut
-        },
-        paymentInfo: {
-          transactionId: null,
-          amount: totalAmount,
-          status: paymentStatus
-        },
-        bookingStatus: "pending"
+        slotInfo: { date: normalizedBookingDate, label: slot.label, timing: slot.timing, checkIn, checkOut },
+        paymentInfo: { transactionId: null, amount: totalAmount, status: paymentStatus },
+        bookingStatus: bookingStatus
       }
     });
 
   } catch (err) {
     if (session.inTransaction()) await session.abortTransaction();
     session.endSession();
-
-    res.status(500).json({
-      success: false,
-      message: err.message
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 // =====================================================
@@ -885,209 +867,209 @@ export const getUserBookings = async (req, res) => {
 // =====================================================
 // CANCEL BOOKING WITH REFUND
 // =====================================================
-export const cancelBooking = async (req, res) => {
-  const session = await mongoose.startSession();
+// export const cancelBooking = async (req, res) => {
+//   const session = await mongoose.startSession();
   
-  try {
-    session.startTransaction();
+//   try {
+//     session.startTransaction();
     
-    const { bookingId, userId, reason } = req.body;
+//     const { bookingId, userId, reason } = req.body;
     
-    console.log("❌ Cancelling booking:", { bookingId, userId, reason });
+//     console.log("❌ Cancelling booking:", { bookingId, userId, reason });
 
-    // Validate required fields
-    if (!bookingId || !userId) {
-      return res.status(400).json({
-        success: false,
-        message: "Booking ID and User ID are required"
-      });
-    }
+//     // Validate required fields
+//     if (!bookingId || !userId) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Booking ID and User ID are required"
+//       });
+//     }
 
-    // Find booking
-    const booking = await Booking.findOne({
-      _id: bookingId,
-      userId: userId
-    }).session(session);
+//     // Find booking
+//     const booking = await Booking.findOne({
+//       _id: bookingId,
+//       userId: userId
+//     }).session(session);
 
-    if (!booking) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found or unauthorized"
-      });
-    }
+//     if (!booking) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(404).json({
+//         success: false,
+//         message: "Booking not found or unauthorized"
+//       });
+//     }
 
-    // Check if booking can be cancelled
-    const now = new Date();
-    const checkIn = new Date(booking.slotDetails.checkIn);
+//     // Check if booking can be cancelled
+//     const now = new Date();
+//     const checkIn = new Date(booking.slotDetails.checkIn);
     
-    if (booking.bookingStatus === 'cancelled') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Booking is already cancelled"
-      });
-    }
+//     if (booking.bookingStatus === 'cancelled') {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: "Booking is already cancelled"
+//       });
+//     }
 
-    if (booking.bookingStatus !== 'confirmed') {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: `Booking status is ${booking.bookingStatus}, cannot cancel`
-      });
-    }
+//     if (booking.bookingStatus !== 'confirmed') {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: `Booking status is ${booking.bookingStatus}, cannot cancel`
+//       });
+//     }
 
-    if (now >= checkIn) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "Cannot cancel booking after check-in time"
-      });
-    }
+//     if (now >= checkIn) {
+//       await session.abortTransaction();
+//       session.endSession();
+//       return res.status(400).json({
+//         success: false,
+//         message: "Cannot cancel booking after check-in time"
+//       });
+//     }
 
-    // Calculate refund amount based on cancellation policy
-    const hoursBeforeCheckIn = Math.abs(checkIn - now) / (1000 * 60 * 60);
-    let refundPercentage = 0;
-    let cancellationCharges = 0;
+//     // Calculate refund amount based on cancellation policy
+//     const hoursBeforeCheckIn = Math.abs(checkIn - now) / (1000 * 60 * 60);
+//     let refundPercentage = 0;
+//     let cancellationCharges = 0;
 
-    // Cancellation policy: 
-    // - 100% refund if cancelled 24+ hours before check-in
-    // - 50% refund if cancelled 12-24 hours before check-in
-    // - 0% refund if cancelled less than 12 hours before check-in
-    if (hoursBeforeCheckIn >= 24) {
-      refundPercentage = 100;
-    } else if (hoursBeforeCheckIn >= 12) {
-      refundPercentage = 50;
-      cancellationCharges = booking.fees.totalAmount * 0.5;
-    }
+//     // Cancellation policy: 
+//     // - 100% refund if cancelled 24+ hours before check-in
+//     // - 50% refund if cancelled 12-24 hours before check-in
+//     // - 0% refund if cancelled less than 12 hours before check-in
+//     if (hoursBeforeCheckIn >= 24) {
+//       refundPercentage = 100;
+//     } else if (hoursBeforeCheckIn >= 12) {
+//       refundPercentage = 50;
+//       cancellationCharges = booking.fees.totalAmount * 0.5;
+//     }
 
-    const refundAmount = (booking.fees.totalAmount * refundPercentage) / 100;
+//     const refundAmount = (booking.fees.totalAmount * refundPercentage) / 100;
 
-    console.log("💰 Refund calculation:", {
-      hoursBeforeCheckIn,
-      refundPercentage,
-      refundAmount,
-      cancellationCharges
-    });
+//     console.log("💰 Refund calculation:", {
+//       hoursBeforeCheckIn,
+//       refundPercentage,
+//       refundAmount,
+//       cancellationCharges
+//     });
 
-    // Initiate refund if applicable
-    let refundDetails = null;
-    if (refundAmount > 0) {
-      try {
-        const refund = await razorpay.payments.refund(
-          booking.paymentDetails.transactionId,
-          {
-            amount: Math.round(refundAmount * 100), // Convert to paise
-            speed: "normal",
-            notes: {
-              bookingId: bookingId,
-              reason: reason || "Cancelled by user",
-              cancelledAt: new Date().toISOString()
-            }
-          }
-        );
+//     // Initiate refund if applicable
+//     let refundDetails = null;
+//     if (refundAmount > 0) {
+//       try {
+//         const refund = await razorpay.payments.refund(
+//           booking.paymentDetails.transactionId,
+//           {
+//             amount: Math.round(refundAmount * 100), // Convert to paise
+//             speed: "normal",
+//             notes: {
+//               bookingId: bookingId,
+//               reason: reason || "Cancelled by user",
+//               cancelledAt: new Date().toISOString()
+//             }
+//           }
+//         );
 
-        console.log("✅ Refund initiated:", refund.id);
+//         console.log("✅ Refund initiated:", refund.id);
 
-        refundDetails = {
-          refundId: refund.id,
-          amount: refundAmount,
-          status: refund.status,
-          requestedAt: new Date(),
-          processedAt: refund.processed_at ? new Date(refund.processed_at * 1000) : null,
-          notes: refund.notes,
-          refundTo: refund.acquirer_data || booking.paymentDetails.method
-        };
+//         refundDetails = {
+//           refundId: refund.id,
+//           amount: refundAmount,
+//           status: refund.status,
+//           requestedAt: new Date(),
+//           processedAt: refund.processed_at ? new Date(refund.processed_at * 1000) : null,
+//           notes: refund.notes,
+//           refundTo: refund.acquirer_data || booking.paymentDetails.method
+//         };
 
-      } catch (refundErr) {
-        console.error("❌ Refund failed:", refundErr);
-        // Continue with cancellation even if refund fails (mark for manual review)
-        refundDetails = {
-          refundId: `MANUAL_${Date.now()}`,
-          amount: refundAmount,
-          status: 'failed',
-          requestedAt: new Date(),
-          error: refundErr.message,
-          requiresManualReview: true
-        };
-      }
-    }
+//       } catch (refundErr) {
+//         console.error("❌ Refund failed:", refundErr);
+//         // Continue with cancellation even if refund fails (mark for manual review)
+//         refundDetails = {
+//           refundId: `MANUAL_${Date.now()}`,
+//           amount: refundAmount,
+//           status: 'failed',
+//           requestedAt: new Date(),
+//           error: refundErr.message,
+//           requiresManualReview: true
+//         };
+//       }
+//     }
 
-    // Update booking status
-    booking.bookingStatus = 'cancelled';
-    booking.cancellationDetails = {
-      cancelledAt: new Date(),
-      cancelledBy: userId,
-      reason: reason,
-      refundAmount: refundAmount,
-      cancellationCharges: cancellationCharges,
-      hoursBeforeCheckIn: hoursBeforeCheckIn
-    };
+//     // Update booking status
+//     booking.bookingStatus = 'cancelled';
+//     booking.cancellationDetails = {
+//       cancelledAt: new Date(),
+//       cancelledBy: userId,
+//       reason: reason,
+//       refundAmount: refundAmount,
+//       cancellationCharges: cancellationCharges,
+//       hoursBeforeCheckIn: hoursBeforeCheckIn
+//     };
 
-    if (refundDetails) {
-      booking.refundDetails = refundDetails;
-    }
+//     if (refundDetails) {
+//       booking.refundDetails = refundDetails;
+//     }
 
-    await booking.save({ session });
+//     await booking.save({ session });
 
-    // Remove booked slot from farmhouse
-    const farmhouse = await Farmhouse.findById(booking.farmhouseId).session(session);
-    if (farmhouse) {
-      farmhouse.bookedSlots = farmhouse.bookedSlots.filter(
-        slot => slot.bookingId.toString() !== bookingId
-      );
-      await farmhouse.save({ session });
-    }
+//     // Remove booked slot from farmhouse
+//     const farmhouse = await Farmhouse.findById(booking.farmhouseId).session(session);
+//     if (farmhouse) {
+//       farmhouse.bookedSlots = farmhouse.bookedSlots.filter(
+//         slot => slot.bookingId.toString() !== bookingId
+//       );
+//       await farmhouse.save({ session });
+//     }
 
-    // Commit transaction
-    await session.commitTransaction();
-    session.endSession();
+//     // Commit transaction
+//     await session.commitTransaction();
+//     session.endSession();
 
-    // Send cancellation notification
-    try {
-      // Send email/SMS notification here
-      console.log("📧 Cancellation notification sent");
-    } catch (notifErr) {
-      console.error("⚠️ Notification failed:", notifErr);
-    }
+//     // Send cancellation notification
+//     try {
+//       // Send email/SMS notification here
+//       console.log("📧 Cancellation notification sent");
+//     } catch (notifErr) {
+//       console.error("⚠️ Notification failed:", notifErr);
+//     }
 
-    res.json({
-      success: true,
-      message: "Booking cancelled successfully",
-      bookingId: bookingId,
-      refundInfo: {
-        eligible: refundAmount > 0,
-        refundAmount: refundAmount,
-        cancellationCharges: cancellationCharges,
-        refundStatus: refundDetails?.status || 'not_eligible',
-        estimatedProcessingTime: refundAmount > 0 ? "5-7 business days" : null
-      },
-      cancellationDetails: {
-        cancelledAt: booking.cancellationDetails.cancelledAt,
-        reason: booking.cancellationDetails.reason,
-        hoursBeforeCheckIn: hoursBeforeCheckIn
-      }
-    });
+//     res.json({
+//       success: true,
+//       message: "Booking cancelled successfully",
+//       bookingId: bookingId,
+//       refundInfo: {
+//         eligible: refundAmount > 0,
+//         refundAmount: refundAmount,
+//         cancellationCharges: cancellationCharges,
+//         refundStatus: refundDetails?.status || 'not_eligible',
+//         estimatedProcessingTime: refundAmount > 0 ? "5-7 business days" : null
+//       },
+//       cancellationDetails: {
+//         cancelledAt: booking.cancellationDetails.cancelledAt,
+//         reason: booking.cancellationDetails.reason,
+//         hoursBeforeCheckIn: hoursBeforeCheckIn
+//       }
+//     });
 
-  } catch (err) {
-    console.error("❌ Error cancelling booking:", err);
+//   } catch (err) {
+//     console.error("❌ Error cancelling booking:", err);
     
-    if (session.inTransaction()) {
-      await session.abortTransaction();
-    }
-    session.endSession();
+//     if (session.inTransaction()) {
+//       await session.abortTransaction();
+//     }
+//     session.endSession();
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to cancel booking",
-      error: err.message
-    });
-  }
-};
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to cancel booking",
+//       error: err.message
+//     });
+//   }
+// };
 
 
 // =====================================================
@@ -4029,6 +4011,76 @@ export const deleteBooking = async (req, res) => {
       success: false,
       message: "Failed to delete booking",
       error: err.message
+    });
+  }
+};
+
+
+
+// =====================================================
+// CANCEL BOOKING (STRICT - ONLY BOOKING STATUS CHANGE)
+// =====================================================
+export const cancelBooking = async (req, res) => {
+  try {
+    const { userId, bookingId } = req.params;
+
+    if (!userId || !bookingId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId and bookingId are required"
+      });
+    }
+
+    const booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found"
+      });
+    }
+
+    if (booking.userId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized"
+      });
+    }
+
+    if (["cancelled", "completed"].includes(booking.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Booking already ${booking.status}`
+      });
+    }
+
+    // remove slot
+    await Farmhouse.updateOne(
+      { _id: booking.farmhouseId },
+      {
+        $pull: {
+          bookedSlots: { bookingId: booking._id }
+        }
+      }
+    );
+
+    // ONLY booking status change
+    booking.status = "cancelled";
+    booking.updatedAt = new Date();
+
+    await booking.save();
+
+    return res.json({
+      success: true,
+      message: "Booking cancelled successfully",
+      bookingId: booking._id
+    });
+
+  } catch (err) {
+    console.error("Cancel Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message
     });
   }
 };

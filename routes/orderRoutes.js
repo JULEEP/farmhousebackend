@@ -25,7 +25,7 @@ router.post("/create", createBooking); // Create booking with verificationId
 router.get('/all', getUserBookings);
 
 // Cancel booking
-router.post('/cancel', cancelBooking);
+router.post('/cancel-booking/:userId/:bookingId', cancelBooking);
 
 router.get('/admin/summary', getAllBookingsSummary); // Admin only
 router.get('/user/:userId/all-status', getUserBookingsAllStatus);
