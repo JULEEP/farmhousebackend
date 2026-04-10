@@ -195,3 +195,71 @@ export const getApplicationDetails = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+
+// ============================================
+// GET ALL VENDORS (SIMPLE - NO FILTER, NO PAGINATION)
+// ============================================
+// ============================================
+// GET ALL VENDORS WITH FARMHOUSE DETAILS
+// ============================================
+export const getAllVendors = async (req, res) => {
+  try {
+    const vendors = await Vendor.find()
+      .populate({
+        path: "farmhouseId",
+        select: "name images address description price"
+      })
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: vendors.length,
+      data: vendors
+    });
+
+  } catch (err) {
+    console.error("Get vendors error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch vendors",
+      error: err.message
+    });
+  }
+};
+
+
+export const deleteVendor = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the application first
+    const application = await Vendor.findById(id);
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: 'Application not found'
+      });
+    }
+
+    // Optional: If application was approved and has a farmhouseId, you might want to delete that farmhouse too
+    if (application.farmhouseId) {
+      await Farmhouse.findByIdAndDelete(application.farmhouseId);
+    }
+
+    // Delete the application
+    await Vendor.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Application deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete vendor error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error while deleting application',
+      error: error.message
+    });
+  }
+};

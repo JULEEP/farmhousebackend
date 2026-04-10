@@ -2,7 +2,9 @@ import express from "express";
 import {
   getPendingApplications,
   getApplicationDetails,
-  reviewVendorApplication
+  reviewVendorApplication,
+  getAllVendors,
+  deleteVendor
 } from "../controllers/adminController.js";
 
 const router = express.Router();
@@ -17,5 +19,8 @@ router.use((req, res, next) => {
 router.get('/vendor/applications/pending', getPendingApplications);
 router.get('/vendor/application/:applicationId', getApplicationDetails);
 router.put('/vendor/application/:applicationId/review', reviewVendorApplication);
+router.get('/allvendor', getAllVendors);
+router.delete('/deletevendor/:id', deleteVendor);
+
 
 export default router;

@@ -1077,17 +1077,9 @@ export const getUserBookings = async (req, res) => {
 // =====================================================
 export const getAllBookingsSummary = async (req, res) => {
   try {
-    // Check if user is admin (optional - add your admin check)
-    // if (!req.user.isAdmin) {
-    //   return res.status(403).json({
-    //     success: false,
-    //     message: "Access denied. Admin only."
-    //   });
-    // }
 
     const currentDate = new Date();
 
-    // Get counts for different statuses
     const [
       totalBookings,
       pendingBookings,
@@ -1095,7 +1087,7 @@ export const getAllBookingsSummary = async (req, res) => {
       canceledBookings,
       upcomingBookings,
       activeBookings,
-      recentBookings
+      allBookings   // ✅ changed here
     ] = await Promise.all([
       Booking.countDocuments(),
       Booking.countDocuments({ status: 'pending' }),
@@ -1113,15 +1105,16 @@ export const getAllBookingsSummary = async (req, res) => {
         'bookingDetails.checkIn': { $lte: currentDate },
         'bookingDetails.checkOut': { $gte: currentDate }
       }),
+
+      // ✅ ALL BOOKINGS WITH FULL DETAILS
       Booking.find()
-        .populate('farmhouseId', 'name address images')
-        .populate('userId', 'name email phone')
+        .populate('farmhouseId') // full farmhouse
+        .populate('userId')      // full user
         .sort({ createdAt: -1 })
-        .limit(10)
         .lean()
     ]);
 
-    // Calculate total revenue
+    // Revenue
     const revenueData = await Booking.aggregate([
       {
         $match: { 
@@ -1140,7 +1133,7 @@ export const getAllBookingsSummary = async (req, res) => {
       }
     ]);
 
-    // Get today's bookings
+    // Today bookings
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
@@ -1150,7 +1143,7 @@ export const getAllBookingsSummary = async (req, res) => {
       'bookingDetails.checkIn': { $gte: todayStart, $lte: todayEnd }
     });
 
-    // Get weekly statistics
+    // Weekly stats
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
 
@@ -1170,7 +1163,7 @@ export const getAllBookingsSummary = async (req, res) => {
       { $sort: { '_id': 1 } }
     ]);
 
-    // Get bookings by farmhouse (top farmhouses)
+    // Top farmhouses
     const topFarmhouses = await Booking.aggregate([
       {
         $match: { status: 'confirmed' }
@@ -1196,6 +1189,7 @@ export const getAllBookingsSummary = async (req, res) => {
 
     res.json({
       success: true,
+
       summary: {
         total: totalBookings,
         pending: pendingBookings,
@@ -1208,29 +1202,26 @@ export const getAllBookingsSummary = async (req, res) => {
         canceled: canceledBookings,
         today: todayBookings
       },
+
       revenue: revenueData[0] || {
         totalRevenue: 0,
         avgBookingValue: 0,
         maxBookingValue: 0,
         minBookingValue: 0
       },
+
       weeklyStats,
+
       topFarmhouses: topFarmhouses.map(fh => ({
         farmhouseId: fh._id,
         name: fh.farmhouseDetails[0]?.name || 'Unknown',
         bookingCount: fh.bookingCount,
         revenue: fh.totalRevenue
       })),
-      recentBookings: recentBookings.map(booking => ({
-        _id: booking._id,
-        user: booking.userId,
-        farmhouse: booking.farmhouseId,
-        date: booking.bookingDetails?.date,
-        checkIn: booking.bookingDetails?.checkIn,
-        totalAmount: booking.totalAmount,
-        status: booking.status,
-        createdAt: booking.createdAt
-      }))
+
+      // ✅ FINAL OUTPUT: ALL BOOKINGS FULL DETAILS
+      bookings: allBookings
+
     });
 
   } catch (err) {
@@ -1242,7 +1233,6 @@ export const getAllBookingsSummary = async (req, res) => {
     });
   }
 };
-
 // =====================================================
 // GET USER BOOKINGS WITH ALL STATUSES IN ONE RESPONSE
 // =====================================================
