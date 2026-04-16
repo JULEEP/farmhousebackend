@@ -44,79 +44,161 @@ app.use(express.json());
 console.log("JWT_SECRET loaded:", process.env.JWT_SECRET ? "✅ Yes" : "❌ No");
 
 
+// app.post(
+//   "/razorpay-webhook",
+//   express.raw({ type: "application/json" }),
+//   async (req, res) => {
+//     try {
+//       const secret = "vihari@25";
+//       const signature = req.headers["x-razorpay-signature"];
+
+//       // Postman testing ke liye bypass signature
+//       let isValid = true;
+
+//       // Uncomment for real Razorpay verification
+//       /*
+//       const expectedSignature = crypto
+//         .createHmac("sha256", secret)
+//         .update(req.body)
+//         .digest("hex");
+
+//       isValid = crypto.timingSafeEqual(
+//         Buffer.from(signature),
+//         Buffer.from(expectedSignature)
+//       );
+
+//       if (!isValid) return res.status(400).send("Invalid signature");
+//       */
+
+//       let event;
+//       if (Buffer.isBuffer(req.body)) event = JSON.parse(req.body.toString());
+//       else event = req.body;
+
+//       console.log("📢 EVENT:", event.event);
+
+//       if (event.event === "payment.captured") {
+//         const payment = event.payload.payment.entity;
+
+//         // Booking ID from notes
+//         const bookingId = payment.notes?.bookingId;
+//         if (!bookingId) return res.status(400).send("BookingId not found");
+
+//         const booking = await Booking.findById(bookingId);
+//         if (!booking) return res.status(404).send("Booking not found");
+
+//         const paymentAmount = payment.amount / 100; // paise → rupees
+//         const totalAmount = booking.totalAmount;
+
+//         // ---------------- PAYMENT CALCULATION ----------------
+//         let advancePayment = (booking.advancePayment || 0) + paymentAmount;
+//         let remainingAmount = totalAmount - advancePayment;
+
+//         let paymentStatus = "partial"; // default partial
+//         if (remainingAmount <= 0) paymentStatus = "paid";
+
+//         // ---------------- UPDATE BOOKING ----------------
+//         booking.razorpayPaymentId = payment.id;
+//         booking.transactionId = payment.id;
+//         booking.advancePayment = advancePayment;
+//         booking.remainingAmount = remainingAmount < 0 ? 0 : remainingAmount;
+//         booking.paymentStatus = paymentStatus;
+//         booking.status = "confirmed";      // hamesha confirmed
+//         booking.completePayment = remainingAmount <= 0;
+//         booking.updatedAt = new Date();
+
+//         await booking.save();
+//         console.log("✅ Booking updated:", booking._id, "Status:", booking.status, "PaymentStatus:", booking.paymentStatus);
+//       }
+
+//       res.json({ status: "ok" });
+//     } catch (err) {
+//       console.error("❌ Webhook Error:", err);
+//       res.status(500).send("Webhook error");
+//     }
+//   }
+// );
+
+
+
 app.post(
   "/razorpay-webhook",
   express.raw({ type: "application/json" }),
   async (req, res) => {
     try {
-      const secret = "vihari@25";
-      const signature = req.headers["x-razorpay-signature"];
-
-      // Postman testing ke liye bypass signature
-      let isValid = true;
-
-      // Uncomment for real Razorpay verification
-      /*
-      const expectedSignature = crypto
-        .createHmac("sha256", secret)
-        .update(req.body)
-        .digest("hex");
-
-      isValid = crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(expectedSignature)
-      );
-
-      if (!isValid) return res.status(400).send("Invalid signature");
-      */
-
-      let event;
-      if (Buffer.isBuffer(req.body)) event = JSON.parse(req.body.toString());
-      else event = req.body;
+      const event = Buffer.isBuffer(req.body)
+        ? JSON.parse(req.body.toString())
+        : req.body;
 
       console.log("📢 EVENT:", event.event);
 
-      if (event.event === "payment.captured") {
-        const payment = event.payload.payment.entity;
-
-        // Booking ID from notes
-        const bookingId = payment.notes?.bookingId;
-        if (!bookingId) return res.status(400).send("BookingId not found");
-
-        const booking = await Booking.findById(bookingId);
-        if (!booking) return res.status(404).send("Booking not found");
-
-        const paymentAmount = payment.amount / 100; // paise → rupees
-        const totalAmount = booking.totalAmount;
-
-        // ---------------- PAYMENT CALCULATION ----------------
-        let advancePayment = (booking.advancePayment || 0) + paymentAmount;
-        let remainingAmount = totalAmount - advancePayment;
-
-        let paymentStatus = "partial"; // default partial
-        if (remainingAmount <= 0) paymentStatus = "paid";
-
-        // ---------------- UPDATE BOOKING ----------------
-        booking.razorpayPaymentId = payment.id;
-        booking.transactionId = payment.id;
-        booking.advancePayment = advancePayment;
-        booking.remainingAmount = remainingAmount < 0 ? 0 : remainingAmount;
-        booking.paymentStatus = paymentStatus;
-        booking.status = "confirmed";      // hamesha confirmed
-        booking.completePayment = remainingAmount <= 0;
-        booking.updatedAt = new Date();
-
-        await booking.save();
-        console.log("✅ Booking updated:", booking._id, "Status:", booking.status, "PaymentStatus:", booking.paymentStatus);
+      if (event.event !== "payment.captured") {
+        return res.json({ status: "ignored" });
       }
 
-      res.json({ status: "ok" });
+      const payment = event.payload.payment.entity;
+      const bookingId = payment.notes?.bookingId;
+
+      if (!bookingId) {
+        return res.status(400).send("BookingId not found");
+      }
+
+      const booking = await Booking.findById(bookingId);
+      if (!booking) {
+        return res.status(404).send("Booking not found");
+      }
+
+      // 🔥 IDEMPOTENCY CHECK (MOST IMPORTANT FIX)
+      if (booking.razorpayPaymentId === payment.id) {
+        return res.json({ status: "duplicate ignored" });
+      }
+
+     const paidAmount = Number(payment.amount) / 100;
+
+// 🔥 ADD NOT REPLACE (THIS IS FIX)
+const advancePayment =
+  Number(booking.advancePayment || 0) + paidAmount;
+
+let remainingAmount =
+  Number(booking.totalAmount) - advancePayment;
+
+remainingAmount = Math.max(0, Number(remainingAmount.toFixed(2)));
+
+const isComplete = remainingAmount === 0;
+
+const paymentStatus = isComplete
+  ? "paid"
+  : advancePayment > 0
+    ? "partial"
+    : "pending";
+
+// 🔥 UPDATE
+booking.advancePayment = advancePayment;
+booking.remainingAmount = remainingAmount;
+
+booking.paymentStatus = paymentStatus;
+booking.completePayment = isComplete;
+
+// 🔥 IMPORTANT FIX HERE
+booking.status = "confirmed";
+
+await booking.save();
+      console.log("✅ PAYMENT UPDATED:", {
+        bookingId,
+        advancePayment,
+        remainingAmount,
+        paymentStatus,
+        completePayment: isComplete
+      });
+
+      return res.json({ status: "ok" });
     } catch (err) {
       console.error("❌ Webhook Error:", err);
-      res.status(500).send("Webhook error");
+      return res.status(500).send("Webhook error");
     }
   }
 );
+
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api", farmhouse);

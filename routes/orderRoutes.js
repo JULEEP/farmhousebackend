@@ -13,7 +13,9 @@ import {
   getPaymentStatistics,
   getUserPayments,
   getRevenueAnalytics,
-  deleteBooking
+  deleteBooking,
+  completeBookingPayment,
+  markPartialPayment
 } from "../controllers/orderController.js";
 
 const router = express.Router();
@@ -46,6 +48,10 @@ router.get('/users/:userId/payments', getUserPayments);
 
 router.get("/revenue", getRevenueAnalytics);
 router.delete('/deletebooking/:bookingId', deleteBooking);
+
+router.post("/complete-payment/:userId/:bookingId", completeBookingPayment);
+router.put("/markpartialstatus/:userId/:bookingId", markPartialPayment);
+
 
 
 export default router;

@@ -652,18 +652,36 @@ export const createBooking = async (req, res) => {
     session.endSession();
 
     // ---------------- RESPONSE ----------------
-    res.json({
-      success: true,
-      message: "Booking created successfully (pending payment)",
-      bookingId: createdBooking._id,
-      bookingDetails: {
-        bookingId: createdBooking._id,
-        farmhouseName: farmhouse.name,
-        slotInfo: { date: normalizedBookingDate, label: slot.label, timing: slot.timing, checkIn, checkOut },
-        paymentInfo: { transactionId: null, amount: totalAmount, status: paymentStatus },
-        bookingStatus: bookingStatus
-      }
-    });
+  res.json({
+  success: true,
+  message: "Booking created successfully (pending payment)",
+  bookingId: createdBooking._id,
+  bookingDetails: {
+    bookingId: createdBooking._id,
+    farmhouseName: farmhouse.name,
+    slotInfo: {
+      date: normalizedBookingDate,
+      label: slot.label,
+      timing: slot.timing,
+      checkIn,
+      checkOut
+    },
+    paymentInfo: {
+      transactionId: null,
+      amount: totalAmount,
+      status: paymentStatus,
+
+      // ✅ added (only these)
+      advancePayment: advance,
+      remainingAmount: remaining,
+      cleaningFee: feeConfig.cleaningFee,
+      serviceFee: feeConfig.serviceFee,
+      slotPrice: slot.price,
+      completePayment
+    },
+    bookingStatus: bookingStatus
+  }
+});
 
   } catch (err) {
     if (session.inTransaction()) await session.abortTransaction();
@@ -1712,305 +1730,103 @@ export const getBookingsByDateRange = async (req, res) => {
 };
 
 
-// =====================================================
-// COMPREHENSIVE DASHBOARD API
-// =====================================================
 export const getDashboardData = async (req, res) => {
   try {
-    const currentDate = new Date();
-    const startOfToday = new Date(currentDate);
+    const now = new Date();
+
+    const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
-    
-    const startOfWeek = new Date(currentDate);
-    startOfWeek.setDate(currentDate.getDate() - 7);
+
+    const startOfWeek = new Date();
+    startOfWeek.setDate(now.getDate() - 7);
     startOfWeek.setHours(0, 0, 0, 0);
-    
-    const startOfMonth = new Date(currentDate);
+
+    const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
-    
-    const startOfYear = new Date(currentDate);
+
+    const startOfYear = new Date();
     startOfYear.setMonth(0, 1);
     startOfYear.setHours(0, 0, 0, 0);
 
-    // Run all queries in parallel for better performance
     const [
-      // User statistics
       totalUsers,
-      newUsersToday,
-      newUsersThisWeek,
-      newUsersThisMonth,
-      newUsersThisYear,
-      usersByDate,
-      
-      // Farmhouse statistics
       totalFarmhouses,
-      activeFarmhouses,
-      inactiveFarmhouses,
-      farmhousesByStatus,
-      farmhousesWithVendors,
-      
-      // Vendor statistics
       totalVendors,
-      vendorsByDate,
-      
-      // Booking statistics
+
       totalBookings,
       pendingBookings,
       confirmedBookings,
       cancelledBookings,
+
       upcomingBookings,
       activeBookings,
       completedBookings,
+
       bookingsToday,
       bookingsThisWeek,
       bookingsThisMonth,
       bookingsThisYear,
-      
-      // Revenue statistics
+
       totalRevenue,
       revenueToday,
       revenueThisWeek,
       revenueThisMonth,
       revenueThisYear,
-      
-      // Recent data
+
       recentUsers,
       recentBookings,
       recentFarmhouses,
       recentVendors,
-      
-      // Top performing
-      topFarmhouses,
-      topUsers,
-      
-      // Charts data
+
       bookingsByDayChart,
-      revenueByDayChart,
-      usersByDayChart,
-      farmhousesByTypeChart,
-      
-      // Location based
-      farmhousesByLocation,
-      
-      // Ratings summary
-      ratingsSummary,
-      
-      // Summary counts for quick stats
-      summaryCounts
+      usersByDayChart
     ] = await Promise.all([
-      // 1. Total users count
+
+      // USERS / FARM / VENDOR
       User.countDocuments(),
-      
-      // 2. New users today
-      User.countDocuments({
-        createdAt: { $gte: startOfToday }
-      }),
-      
-      // 3. New users this week
-      User.countDocuments({
-        createdAt: { $gte: startOfWeek }
-      }),
-      
-      // 4. New users this month
-      User.countDocuments({
-        createdAt: { $gte: startOfMonth }
-      }),
-      
-      // 5. New users this year
-      User.countDocuments({
-        createdAt: { $gte: startOfYear }
-      }),
-      
-      // 6. Users by date (for chart)
-      User.aggregate([
-        {
-          $match: {
-            createdAt: { $gte: startOfMonth }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              year: { $year: "$createdAt" },
-              month: { $month: "$createdAt" },
-              day: { $dayOfMonth: "$createdAt" }
-            },
-            count: { $sum: 1 }
-          }
-        },
-        {
-          $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 }
-        },
-        {
-          $project: {
-            date: {
-              $dateToString: {
-                format: "%Y-%m-%d",
-                date: {
-                  $dateFromParts: {
-                    year: "$_id.year",
-                    month: "$_id.month",
-                    day: "$_id.day"
-                  }
-                }
-              }
-            },
-            count: 1,
-            _id: 0
-          }
-        }
-      ]),
-      
-      // 7. Total farmhouses
       Farmhouse.countDocuments(),
-      
-      // 8. Active farmhouses
-      Farmhouse.countDocuments({ active: true }),
-      
-      // 9. Inactive farmhouses
-      Farmhouse.countDocuments({ active: false }),
-      
-      // 10. Farmhouses by status
-      Farmhouse.aggregate([
-        {
-          $group: {
-            _id: "$active",
-            count: { $sum: 1 }
-          }
-        }
-      ]),
-      
-      // 11. Farmhouses with vendor info
-      Farmhouse.aggregate([
-        {
-          $lookup: {
-            from: "vendors",
-            localField: "_id",
-            foreignField: "farmhouseId",
-            as: "vendor"
-          }
-        },
-        {
-          $project: {
-            name: 1,
-            address: 1,
-            active: 1,
-            pricePerHour: 1,
-            images: { $slice: ["$images", 1] },
-            hasVendor: { $gt: [{ $size: "$vendor" }, 0] },
-            vendorCount: { $size: "$vendor" },
-            createdAt: 1
-          }
-        },
-        { $sort: { createdAt: -1 } },
-        { $limit: 5 }
-      ]),
-      
-      // 12. Total vendors
       Vendor.countDocuments(),
-      
-      // 13. Vendors by date
-      Vendor.aggregate([
-        {
-          $match: {
-            createdAt: { $gte: startOfMonth }
-          }
-        },
-        {
-          $group: {
-            _id: {
-              year: { $year: "$createdAt" },
-              month: { $month: "$createdAt" },
-              day: { $dayOfMonth: "$createdAt" }
-            },
-            count: { $sum: 1 }
-          }
-        },
-        {
-          $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 }
-        },
-        {
-          $project: {
-            date: {
-              $dateToString: {
-                format: "%Y-%m-%d",
-                date: {
-                  $dateFromParts: {
-                    year: "$_id.year",
-                    month: "$_id.month",
-                    day: "$_id.day"
-                  }
-                }
-              }
-            },
-            count: 1,
-            _id: 0
-          }
-        }
-      ]),
-      
-      // 14. Total bookings
+
+      // BOOKINGS
       Booking.countDocuments(),
-      
-      // 15. Pending bookings
-      Booking.countDocuments({ status: 'pending' }),
-      
-      // 16. Confirmed bookings
-      Booking.countDocuments({ status: 'confirmed' }),
-      
-      // 17. Cancelled bookings
-      Booking.countDocuments({ status: 'cancelled' }),
-      
-      // 18. Upcoming bookings
+      Booking.countDocuments({ status: "pending" }),
+      Booking.countDocuments({ status: "confirmed" }),
+      Booking.countDocuments({ status: "cancelled" }),
+
       Booking.countDocuments({
-        status: 'confirmed',
-        'bookingDetails.checkIn': { $gt: currentDate }
+        status: "confirmed",
+        "bookingDetails.checkIn": { $gt: now }
       }),
-      
-      // 19. Active bookings (currently happening)
+
       Booking.countDocuments({
-        status: 'confirmed',
-        'bookingDetails.checkIn': { $lte: currentDate },
-        'bookingDetails.checkOut': { $gte: currentDate }
+        status: "confirmed",
+        "bookingDetails.checkIn": { $lte: now },
+        "bookingDetails.checkOut": { $gte: now }
       }),
-      
-      // 20. Completed bookings
+
       Booking.countDocuments({
-        status: 'confirmed',
-        'bookingDetails.checkOut': { $lt: currentDate }
+        status: "completed"
       }),
-      
-      // 21. Bookings today
+
       Booking.countDocuments({
-        'bookingDetails.checkIn': {
+        "bookingDetails.checkIn": {
           $gte: startOfToday,
-          $lt: new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000)
+          $lt: new Date(startOfToday.getTime() + 86400000)
         }
       }),
-      
-      // 22. Bookings this week
-      Booking.countDocuments({
-        createdAt: { $gte: startOfWeek }
-      }),
-      
-      // 23. Bookings this month
-      Booking.countDocuments({
-        createdAt: { $gte: startOfMonth }
-      }),
-      
-      // 24. Bookings this year
-      Booking.countDocuments({
-        createdAt: { $gte: startOfYear }
-      }),
-      
-      // 25. Total revenue (confirmed bookings only)
+
+      Booking.countDocuments({ createdAt: { $gte: startOfWeek } }),
+      Booking.countDocuments({ createdAt: { $gte: startOfMonth } }),
+      Booking.countDocuments({ createdAt: { $gte: startOfYear } }),
+
+      // =========================
+      // 💰 REVENUE (ONLY COMPLETED)
+      // =========================
+
       Booking.aggregate([
         {
-          $match: {
-            status: 'confirmed',
-            paymentStatus: 'completed'
-          }
+          $match: { status: "completed" }
         },
         {
           $group: {
@@ -2019,13 +1835,11 @@ export const getDashboardData = async (req, res) => {
           }
         }
       ]),
-      
-      // 26. Revenue today
+
       Booking.aggregate([
         {
           $match: {
-            status: 'confirmed',
-            paymentStatus: 'completed',
+            status: "completed",
             createdAt: { $gte: startOfToday }
           }
         },
@@ -2036,13 +1850,11 @@ export const getDashboardData = async (req, res) => {
           }
         }
       ]),
-      
-      // 27. Revenue this week
+
       Booking.aggregate([
         {
           $match: {
-            status: 'confirmed',
-            paymentStatus: 'completed',
+            status: "completed",
             createdAt: { $gte: startOfWeek }
           }
         },
@@ -2053,13 +1865,11 @@ export const getDashboardData = async (req, res) => {
           }
         }
       ]),
-      
-      // 28. Revenue this month
+
       Booking.aggregate([
         {
           $match: {
-            status: 'confirmed',
-            paymentStatus: 'completed',
+            status: "completed",
             createdAt: { $gte: startOfMonth }
           }
         },
@@ -2070,13 +1880,11 @@ export const getDashboardData = async (req, res) => {
           }
         }
       ]),
-      
-      // 29. Revenue this year
+
       Booking.aggregate([
         {
           $match: {
-            status: 'confirmed',
-            paymentStatus: 'completed',
+            status: "completed",
             createdAt: { $gte: startOfYear }
           }
         },
@@ -2087,115 +1895,26 @@ export const getDashboardData = async (req, res) => {
           }
         }
       ]),
-      
-      // 30. Recent users (last 5)
-      User.find()
-        .select('-password -deleteToken -deleteTokenExpiration')
-        .sort({ createdAt: -1 })
-        .limit(5)
-        .lean(),
-      
-      // 31. Recent bookings (last 5)
+
+      // RECENT DATA
+      User.find().sort({ createdAt: -1 }).limit(5).lean(),
+
       Booking.find()
-        .populate('userId', 'fullName email phoneNumber')
-        .populate('farmhouseId', 'name address')
+        .populate("userId", "fullName email")
+        .populate("farmhouseId", "name address")
         .sort({ createdAt: -1 })
         .limit(5)
         .lean(),
-      
-      // 32. Recent farmhouses (last 5)
-      Farmhouse.find()
-        .sort({ createdAt: -1 })
-        .limit(5)
-        .lean(),
-      
-      // 33. Recent vendors (last 5)
-      Vendor.find()
-        .sort({ createdAt: -1 })
-        .limit(5)
-        .lean(),
-      
-      // 34. Top farmhouses by bookings
-      Booking.aggregate([
-        {
-          $match: { status: 'confirmed' }
-        },
-        {
-          $group: {
-            _id: '$farmhouseId',
-            bookingCount: { $sum: 1 },
-            totalRevenue: { $sum: '$totalAmount' }
-          }
-        },
-        { $sort: { bookingCount: -1 } },
-        { $limit: 5 },
-        {
-          $lookup: {
-            from: 'farmhouses',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'farmhouse'
-          }
-        },
-        {
-          $unwind: '$farmhouse'
-        },
-        {
-          $project: {
-            farmhouseId: '$_id',
-            farmhouseName: '$farmhouse.name',
-            address: '$farmhouse.address',
-            bookingCount: 1,
-            totalRevenue: 1,
-            averageRating: '$farmhouse.rating'
-          }
-        }
-      ]),
-      
-      // 35. Top users by bookings
-      Booking.aggregate([
-        {
-          $match: { status: 'confirmed' }
-        },
-        {
-          $group: {
-            _id: '$userId',
-            bookingCount: { $sum: 1 },
-            totalSpent: { $sum: '$totalAmount' }
-          }
-        },
-        { $sort: { bookingCount: -1 } },
-        { $limit: 5 },
-        {
-          $lookup: {
-            from: 'users',
-            localField: '_id',
-            foreignField: '_id',
-            as: 'user'
-          }
-        },
-        {
-          $unwind: '$user'
-        },
-        {
-          $project: {
-            userId: '$_id',
-            name: '$user.fullName',
-            email: '$user.email',
-            phone: '$user.phoneNumber',
-            bookingCount: 1,
-            totalSpent: 1
-          }
-        }
-      ]),
-      
-      // 36. Bookings by day chart (last 30 days)
+
+      Farmhouse.find().sort({ createdAt: -1 }).limit(5).lean(),
+
+      Vendor.find().sort({ createdAt: -1 }).limit(5).lean(),
+
+      // CHARTS - BOOKINGS
       Booking.aggregate([
         {
           $match: {
-            createdAt: {
-              $gte: new Date(currentDate.getTime() - 30 * 24 * 60 * 60 * 1000)
-            }
+            createdAt: { $gte: startOfMonth }
           }
         },
         {
@@ -2204,10 +1923,14 @@ export const getDashboardData = async (req, res) => {
               $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
             },
             count: { $sum: 1 },
-            revenue: { $sum: "$totalAmount" }
+            revenue: {
+              $sum: {
+                $cond: [{ $eq: ["$status", "completed"] }, "$totalAmount", 0]
+              }
+            }
           }
         },
-        { $sort: { "_id": 1 } },
+        { $sort: { _id: 1 } },
         {
           $project: {
             date: "$_id",
@@ -2217,17 +1940,12 @@ export const getDashboardData = async (req, res) => {
           }
         }
       ]),
-      
-      // 37. Revenue by day chart (last 30 days)
-      // Already included in bookingsByDayChart, but we'll keep separate for clarity
-      
-      // 38. Users by day chart (last 30 days)
+
+      // USERS CHART
       User.aggregate([
         {
           $match: {
-            createdAt: {
-              $gte: new Date(currentDate.getTime() - 30 * 24 * 60 * 60 * 1000)
-            }
+            createdAt: { $gte: startOfMonth }
           }
         },
         {
@@ -2238,7 +1956,7 @@ export const getDashboardData = async (req, res) => {
             count: { $sum: 1 }
           }
         },
-        { $sort: { "_id": 1 } },
+        { $sort: { _id: 1 } },
         {
           $project: {
             date: "$_id",
@@ -2246,130 +1964,20 @@ export const getDashboardData = async (req, res) => {
             _id: 0
           }
         }
-      ]),
-      
-      // 39. Farmhouses by type/amenities
-      Farmhouse.aggregate([
-        { $unwind: "$amenities" },
-        {
-          $group: {
-            _id: "$amenities",
-            count: { $sum: 1 }
-          }
-        },
-        { $sort: { count: -1 } },
-        { $limit: 10 },
-        {
-          $project: {
-            amenity: "$_id",
-            count: 1,
-            _id: 0
-          }
-        }
-      ]),
-      
-      // 40. Farmhouses by location (city extraction from address)
-      Farmhouse.aggregate([
-        {
-          $group: {
-            _id: {
-              $arrayElemAt: [
-                { $split: ["$address", ","] },
-                1
-              ]
-            },
-            count: { $sum: 1 },
-            farmhouses: { $push: { name: "$name", id: "$_id" } }
-          }
-        },
-        { $match: { _id: { $ne: null } } },
-        { $sort: { count: -1 } },
-        { $limit: 5 },
-        {
-          $project: {
-            city: { $trim: { input: "$_id" } },
-            count: 1,
-            farmhouses: { $slice: ["$farmhouses", 3] },
-            _id: 0
-          }
-        }
-      ]),
-      
-      // 41. Ratings summary
-      Farmhouse.aggregate([
-        {
-          $group: {
-            _id: null,
-            averageRating: { $avg: "$rating" },
-            totalRatedFarmhouses: {
-              $sum: { $cond: [{ $gt: ["$rating", 0] }, 1, 0] }
-            },
-            farmhousesWithReviews: {
-              $sum: { $cond: [{ $gt: [{ $size: "$reviews" }, 0] }, 1, 0] }
-            },
-            totalReviews: { $sum: { $size: "$reviews" } }
-          }
-        },
-        {
-          $project: {
-            averageRating: { $round: ["$averageRating", 1] },
-            totalRatedFarmhouses: 1,
-            farmhousesWithReviews: 1,
-            totalReviews: 1,
-            _id: 0
-          }
-        }
-      ]),
-      
-      // 42. Summary counts for quick stats
-      Promise.all([
-        User.countDocuments(),
-        Farmhouse.countDocuments(),
-        Vendor.countDocuments(),
-        Booking.countDocuments(),
-        Booking.countDocuments({ status: 'confirmed' }),
-        Booking.aggregate([
-          { $match: { status: 'confirmed', paymentStatus: 'completed' } },
-          { $group: { _id: null, total: { $sum: "$totalAmount" } } }
-        ])
-      ]).then(([users, farmhouses, vendors, bookings, confirmedBookings, revenueResult]) => ({
-        users,
-        farmhouses,
-        vendors,
-        bookings,
-        confirmedBookings,
-        revenue: revenueResult[0]?.total || 0
-      }))
+      ])
     ]);
 
-    // Process revenue results
-    const processRevenue = (revenueArray) => revenueArray[0]?.total || 0;
+    const getTotal = (arr) => arr?.[0]?.total || 0;
 
-    // Prepare the comprehensive dashboard response
-    const dashboardData = {
+    const dashboard = {
       success: true,
-      timestamp: new Date().toISOString(),
-      
-      // Summary statistics
+      timestamp: new Date(),
+
       summary: {
-        users: {
-          total: totalUsers,
-          newToday: newUsersToday,
-          newThisWeek: newUsersThisWeek,
-          newThisMonth: newUsersThisMonth,
-          newThisYear: newUsersThisYear
-        },
-        farmhouses: {
-          total: totalFarmhouses,
-          active: activeFarmhouses,
-          inactive: inactiveFarmhouses,
-          withVendors: farmhousesWithVendors.filter(f => f.hasVendor).length,
-          withoutVendors: farmhousesWithVendors.filter(f => !f.hasVendor).length
-        },
-        vendors: {
-          total: totalVendors,
-          newThisMonth: vendorsByDate.reduce((sum, day) => sum + day.count, 0)
-        },
+        users: totalUsers,
+        farmhouses: totalFarmhouses,
+        vendors: totalVendors,
+
         bookings: {
           total: totalBookings,
           pending: pendingBookings,
@@ -2381,111 +1989,39 @@ export const getDashboardData = async (req, res) => {
           today: bookingsToday,
           thisWeek: bookingsThisWeek,
           thisMonth: bookingsThisMonth,
-          thisYear: bookingsThisYear,
-          completionRate: totalBookings > 0 
-            ? Math.round((completedBookings / totalBookings) * 100) 
-            : 0
+          thisYear: bookingsThisYear
         },
+
         revenue: {
-          total: processRevenue(totalRevenue),
-          today: processRevenue(revenueToday),
-          thisWeek: processRevenue(revenueThisWeek),
-          thisMonth: processRevenue(revenueThisMonth),
-          thisYear: processRevenue(revenueThisYear),
-          averagePerBooking: confirmedBookings > 0 
-            ? Math.round(processRevenue(totalRevenue) / confirmedBookings) 
-            : 0
+          total: getTotal(totalRevenue),
+          today: getTotal(revenueToday),
+          thisWeek: getTotal(revenueThisWeek),
+          thisMonth: getTotal(revenueThisMonth),
+          thisYear: getTotal(revenueThisYear)
         }
       },
-      
-      // Charts data
+
       charts: {
-        usersByDay: usersByDate,
-        bookingsByDay: bookingsByDayChart.map(item => ({
-          date: item.date,
-          bookings: item.count,
-          revenue: item.revenue
-        })),
-        revenueByDay: bookingsByDayChart.map(item => ({
-          date: item.date,
-          revenue: item.revenue
-        })),
-        farmhousesByAmenities: farmhousesByTypeChart,
-        farmhousesByStatus: farmhousesByStatus.map(item => ({
-          status: item._id ? 'Active' : 'Inactive',
-          count: item.count
-        }))
+        bookingsByDay: bookingsByDayChart,
+        usersByDay: usersByDayChart
       },
-      
-      // Recent activity
+
       recentActivity: {
-        users: recentUsers.map(user => ({
-          id: user._id,
-          name: user.fullName,
-          email: user.email,
-          phone: user.phoneNumber,
-          joinedAt: user.createdAt
-        })),
-        bookings: recentBookings.map(booking => ({
-          id: booking._id,
-          user: booking.userId,
-          farmhouse: booking.farmhouseId,
-          date: booking.bookingDetails?.date,
-          checkIn: booking.bookingDetails?.checkIn,
-          totalAmount: booking.totalAmount,
-          status: booking.status,
-          bookedAt: booking.createdAt
-        })),
-        farmhouses: recentFarmhouses.map(farmhouse => ({
-          id: farmhouse._id,
-          name: farmhouse.name,
-          address: farmhouse.address,
-          pricePerHour: farmhouse.pricePerHour,
-          active: farmhouse.active,
-          image: farmhouse.images?.[0],
-          createdAt: farmhouse.createdAt
-        })),
-        vendors: recentVendors.map(vendor => ({
-          id: vendor._id,
-          name: vendor.name,
-          farmhouseId: vendor.farmhouseId,
-          farmhouseName: vendor.farmhouseName,
-          createdAt: vendor.createdAt
-        }))
-      },
-      
-      // Top performers
-      topPerformers: {
-        farmhouses: topFarmhouses,
-        users: topUsers
-      },
-      
-      // Location based
-      locationInsights: {
-        farmhousesByCity: farmhousesByLocation
-      },
-      
-      // Ratings
-      ratings: ratingsSummary[0] || {
-        averageRating: 0,
-        totalRatedFarmhouses: 0,
-        farmhousesWithReviews: 0,
-        totalReviews: 0
-      },
-      
-      // Quick stats
-      quickStats: summaryCounts
+        users: recentUsers,
+        bookings: recentBookings,
+        farmhouses: recentFarmhouses,
+        vendors: recentVendors
+      }
     };
 
-    res.json(dashboardData);
+    return res.json(dashboard);
 
   } catch (err) {
-    console.error("❌ Error fetching dashboard data:", err);
-    res.status(500).json({
+    console.error("Dashboard Error:", err);
+    return res.status(500).json({
       success: false,
-      message: "Failed to fetch dashboard data",
-      error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      message: "Dashboard failed",
+      error: err.message
     });
   }
 };
@@ -3384,38 +2920,34 @@ export const getRevenueAnalytics = async (req, res) => {
     console.log("📊 Revenue Analytics Request:", { period, startDate, endDate, farmhouseId });
 
     // =====================================================
-    // DATE RANGE CALCULATION
+    // DATE RANGE CALCULATION (UTC based to avoid timezone issues)
     // =====================================================
-    const currentDate = new Date();
+    const now = new Date();
     let start = new Date();
     let end = new Date();
 
-    // Set date range based on period
     switch(period) {
       case 'day':
-        start.setHours(0, 0, 0, 0);
-        end.setHours(23, 59, 59, 999);
+        start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+        end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
         break;
         
       case 'week':
-        // Get current week (Sunday to Saturday)
-        const dayOfWeek = currentDate.getDay(); // 0 = Sunday
-        start.setDate(currentDate.getDate() - dayOfWeek);
-        start.setHours(0, 0, 0, 0);
-        
+        const dayOfWeek = now.getUTCDay(); // 0 = Sunday
+        start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - dayOfWeek));
         end = new Date(start);
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
+        end.setUTCDate(start.getUTCDate() + 6);
+        end.setUTCHours(23, 59, 59, 999);
         break;
         
       case 'month':
-        start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-        end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59, 999);
+        start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+        end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
         break;
         
       case 'year':
-        start = new Date(currentDate.getFullYear(), 0, 1);
-        end = new Date(currentDate.getFullYear(), 11, 31, 23, 59, 59, 999);
+        start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+        end = new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
         break;
         
       case 'custom':
@@ -3426,18 +2958,16 @@ export const getRevenueAnalytics = async (req, res) => {
           });
         }
         start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
+        start.setUTCHours(0, 0, 0, 0);
         end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
+        end.setUTCHours(23, 59, 59, 999);
         break;
         
       default:
-        // Default to current month
-        start = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-        end = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0, 23, 59, 59, 999);
+        start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+        end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
     }
 
-    // Validate dates
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       return res.status(400).json({
         success: false,
@@ -3456,7 +2986,6 @@ export const getRevenueAnalytics = async (req, res) => {
       createdAt: { $gte: start, $lte: end }
     };
 
-    // Add farmhouse filter if provided
     if (farmhouseId) {
       if (!mongoose.Types.ObjectId.isValid(farmhouseId)) {
         return res.status(400).json({
@@ -3472,8 +3001,6 @@ export const getRevenueAnalytics = async (req, res) => {
     // =====================================================
     const revenueByFarmhouse = await Booking.aggregate([
       { $match: matchQuery },
-      
-      // Group by farmhouse
       {
         $group: {
           _id: '$farmhouseId',
@@ -3498,8 +3025,6 @@ export const getRevenueAnalytics = async (req, res) => {
           }
         }
       },
-      
-      // Add farmhouse details
       {
         $lookup: {
           from: 'farmhouses',
@@ -3508,23 +3033,18 @@ export const getRevenueAnalytics = async (req, res) => {
           as: 'farmhouseDetails'
         }
       },
-      
       { $unwind: '$farmhouseDetails' },
-      
-      // Calculate unique users count
       {
         $addFields: {
           uniqueUserCount: { $size: '$uniqueUsers' }
         }
       },
-      
-      // Project final structure
       {
         $project: {
           farmhouseId: '$_id',
           farmhouseName: '$farmhouseDetails.name',
           farmhouseAddress: '$farmhouseDetails.address',
-          farmhouseRating: '$farmhouseDetails.rating',
+          farmhouseRating: { $ifNull: ['$farmhouseDetails.rating', 0] },
           farmhouseImage: { $arrayElemAt: ['$farmhouseDetails.images', 0] },
           totalRevenue: 1,
           bookingCount: 1,
@@ -3537,19 +3057,17 @@ export const getRevenueAnalytics = async (req, res) => {
           maxBookingValue: 1,
           firstBooking: 1,
           lastBooking: 1,
-          bookings: { $slice: ['$bookings', 5] } // Only last 5 bookings
+          bookings: { $slice: ['$bookings', 5] }
         }
       },
-      
       { $sort: { totalRevenue: -1 } }
     ]);
 
     // =====================================================
-    // COMBINED REVENUE STATISTICS
+    // COMBINED STATISTICS
     // =====================================================
     const combinedStats = await Booking.aggregate([
       { $match: matchQuery },
-      
       {
         $group: {
           _id: null,
@@ -3565,7 +3083,6 @@ export const getRevenueAnalytics = async (req, res) => {
           minBookingValue: { $min: '$totalAmount' }
         }
       },
-      
       {
         $addFields: {
           uniqueFarmhouseCount: { $size: '$uniqueFarmhouses' },
@@ -3575,7 +3092,7 @@ export const getRevenueAnalytics = async (req, res) => {
     ]);
 
     // =====================================================
-    // TIME-BASED GROUPING (for trends)
+    // TIME-BASED TRENDS
     // =====================================================
     let dateGroupFormat;
     switch(period) {
@@ -3617,7 +3134,6 @@ export const getRevenueAnalytics = async (req, res) => {
 
     const revenueByTime = await Booking.aggregate([
       { $match: matchQuery },
-      
       {
         $group: {
           _id: dateGroupFormat,
@@ -3626,14 +3142,13 @@ export const getRevenueAnalytics = async (req, res) => {
           users: { $addToSet: '$userId' }
         }
       },
-      
       {
         $addFields: {
           uniqueUsers: { $size: '$users' },
           period: {
             $switch: {
               branches: [
-                { case: { $eq: ['day', period] }, then: { 
+                { case: { $eq: [period, 'day'] }, then: { 
                   $dateToString: { 
                     format: "%Y-%m-%d %H:00", 
                     date: { 
@@ -3646,13 +3161,13 @@ export const getRevenueAnalytics = async (req, res) => {
                     } 
                   } 
                 }},
-                { case: { $eq: ['week', period] }, then: { 
+                { case: { $eq: [period, 'week'] }, then: { 
                   $concat: [
                     { $toString: '$_id.year' }, '-W', 
                     { $toString: '$_id.week' }
                   ] 
                 }},
-                { case: { $eq: ['month', period] }, then: { 
+                { case: { $eq: [period, 'month'] }, then: { 
                   $dateToString: { 
                     format: "%Y-%m", 
                     date: { 
@@ -3663,7 +3178,7 @@ export const getRevenueAnalytics = async (req, res) => {
                     } 
                   } 
                 }},
-                { case: { $eq: ['year', period] }, then: { 
+                { case: { $eq: [period, 'year'] }, then: { 
                   $toString: '$_id.year' 
                 }}
               ],
@@ -3683,9 +3198,7 @@ export const getRevenueAnalytics = async (req, res) => {
           }
         }
       },
-      
       { $sort: { '_id.year': 1, '_id.month': 1, '_id.day': 1 } },
-      
       {
         $project: {
           _id: 0,
@@ -3722,11 +3235,10 @@ export const getRevenueAnalytics = async (req, res) => {
     ]);
 
     // =====================================================
-    // USER BOOKINGS PER FARMHOUSE
+    // USER DISTRIBUTION PER FARMHOUSE
     // =====================================================
     const userBookingsPerFarmhouse = await Booking.aggregate([
       { $match: matchQuery },
-      
       {
         $group: {
           _id: {
@@ -3737,7 +3249,6 @@ export const getRevenueAnalytics = async (req, res) => {
           totalSpent: { $sum: '$totalAmount' }
         }
       },
-      
       {
         $group: {
           _id: '$_id.farmhouseId',
@@ -3751,7 +3262,6 @@ export const getRevenueAnalytics = async (req, res) => {
           totalUsers: { $sum: 1 }
         }
       },
-      
       {
         $lookup: {
           from: 'farmhouses',
@@ -3760,25 +3270,22 @@ export const getRevenueAnalytics = async (req, res) => {
           as: 'farmhouse'
         }
       },
-      
       { $unwind: '$farmhouse' },
-      
       {
         $project: {
           farmhouseId: '$_id',
           farmhouseName: '$farmhouse.name',
           totalUsers: 1,
-          users: { $slice: ['$users', 10] } // Top 10 users per farmhouse
+          users: { $slice: ['$users', 10] }
         }
       }
     ]);
 
     // =====================================================
-    // CALCULATE GROWTH PERCENTAGES
+    // GROWTH CALCULATIONS
     // =====================================================
     const currentPeriodRevenue = combinedStats[0]?.totalRevenue || 0;
     const previousPeriodRevenue = previousPeriodStats[0]?.revenue || 0;
-    
     let revenueGrowth = 0;
     if (previousPeriodRevenue > 0) {
       revenueGrowth = ((currentPeriodRevenue - previousPeriodRevenue) / previousPeriodRevenue) * 100;
@@ -3786,20 +3293,18 @@ export const getRevenueAnalytics = async (req, res) => {
 
     const currentPeriodBookings = combinedStats[0]?.totalBookings || 0;
     const previousPeriodBookings = previousPeriodStats[0]?.bookings || 0;
-    
     let bookingsGrowth = 0;
     if (previousPeriodBookings > 0) {
       bookingsGrowth = ((currentPeriodBookings - previousPeriodBookings) / previousPeriodBookings) * 100;
     }
 
     // =====================================================
-    // PREPARE RESPONSE
+    // FINAL RESPONSE
     // =====================================================
     const response = {
       success: true,
       message: 'Revenue analytics retrieved successfully',
       
-      // Period information
       period: {
         type: period,
         start: start.toISOString(),
@@ -3814,7 +3319,6 @@ export const getRevenueAnalytics = async (req, res) => {
         }
       },
       
-      // Combined revenue for all farmhouses
       combined: combinedStats[0] ? {
         totalRevenue: currentPeriodRevenue,
         totalBookings: currentPeriodBookings,
@@ -3851,7 +3355,6 @@ export const getRevenueAnalytics = async (req, res) => {
         }
       },
       
-      // Revenue by farmhouse (array of farmhouses with their stats)
       byFarmhouse: revenueByFarmhouse.map(fh => ({
         farmhouseId: fh.farmhouseId,
         farmhouseName: fh.farmhouseName,
@@ -3878,10 +3381,8 @@ export const getRevenueAnalytics = async (req, res) => {
         recentBookings: fh.bookings
       })),
       
-      // Time-based revenue trends
-      trends: revenueByTime,
+      trends: revenueByTime || [],
       
-      // User booking distribution by farmhouse
       userDistribution: userBookingsPerFarmhouse.map(item => ({
         farmhouseId: item.farmhouseId,
         farmhouseName: item.farmhouseName,
@@ -3893,7 +3394,6 @@ export const getRevenueAnalytics = async (req, res) => {
         }))
       })),
       
-      // Summary statistics
       summary: {
         totalFarmhousesWithRevenue: revenueByFarmhouse.length,
         farmhousesWithNoRevenue: await Farmhouse.countDocuments({
@@ -3913,39 +3413,37 @@ export const getRevenueAnalytics = async (req, res) => {
       }
     };
 
-    // If specific farmhouse requested, simplify response
     if (farmhouseId && revenueByFarmhouse.length === 1) {
-      const farmhouseData = revenueByFarmhouse[0];
+      const fh = revenueByFarmhouse[0];
       response.farmhouse = {
-        farmhouseId: farmhouseData.farmhouseId,
-        farmhouseName: farmhouseData.farmhouseName,
-        farmhouseAddress: farmhouseData.farmhouseAddress,
-        farmhouseRating: farmhouseData.farmhouseRating,
-        farmhouseImage: farmhouseData.farmhouseImage,
+        farmhouseId: fh.farmhouseId,
+        farmhouseName: fh.farmhouseName,
+        farmhouseAddress: fh.farmhouseAddress,
+        farmhouseRating: fh.farmhouseRating,
+        farmhouseImage: fh.farmhouseImage,
         statistics: {
-          totalRevenue: farmhouseData.totalRevenue,
-          bookingCount: farmhouseData.bookingCount,
-          uniqueUsers: farmhouseData.uniqueUserCount,
-          averageBookingValue: farmhouseData.averageBookingValue,
-          minBookingValue: farmhouseData.minBookingValue,
-          maxBookingValue: farmhouseData.maxBookingValue,
+          totalRevenue: fh.totalRevenue,
+          bookingCount: fh.bookingCount,
+          uniqueUsers: fh.uniqueUserCount,
+          averageBookingValue: fh.averageBookingValue,
+          minBookingValue: fh.minBookingValue,
+          maxBookingValue: fh.maxBookingValue,
           revenueBreakdown: {
-            slotRevenue: farmhouseData.slotRevenue,
-            cleaningFee: farmhouseData.cleaningFeeRevenue,
-            serviceFee: farmhouseData.serviceFeeRevenue
+            slotRevenue: fh.slotRevenue,
+            cleaningFee: fh.cleaningFeeRevenue,
+            serviceFee: fh.serviceFeeRevenue
           }
         },
         timeline: {
-          firstBooking: farmhouseData.firstBooking,
-          lastBooking: farmhouseData.lastBooking
+          firstBooking: fh.firstBooking,
+          lastBooking: fh.lastBooking
         },
-        recentBookings: farmhouseData.bookings
+        recentBookings: fh.bookings
       };
       delete response.byFarmhouse;
     }
 
     console.log("✅ Revenue analytics generated successfully");
-    
     res.json(response);
 
   } catch (err) {
@@ -3958,7 +3456,6 @@ export const getRevenueAnalytics = async (req, res) => {
     });
   }
 };
-
 
 
 export const deleteBooking = async (req, res) => {
@@ -4068,6 +3565,120 @@ export const cancelBooking = async (req, res) => {
 
   } catch (err) {
     console.error("Cancel Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+};
+
+
+
+
+export const completeBookingPayment = async (req, res) => {
+  try {
+    const { userId, bookingId } = req.params;
+    const { remainingAmount } = req.body;
+
+    if (remainingAmount === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "remainingAmount is required"
+      });
+    }
+
+    const booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found"
+      });
+    }
+
+    if (booking.userId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized"
+      });
+    }
+
+    if (booking.completePayment) {
+      return res.status(400).json({
+        success: false,
+        message: "Already fully paid"
+      });
+    }
+
+    if (Number(remainingAmount) !== Number(booking.remainingAmount)) {
+      return res.status(400).json({
+        success: false,
+        message: `Remaining mismatch. Expected ₹${booking.remainingAmount}`
+      });
+    }
+
+    // 🔥 ONLY PAYMENT STATE CHANGE
+    booking.paymentStatus = "in_progress";
+
+    await booking.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Proceed to payment",
+      bookingId: booking._id,
+      amountToPay: remainingAmount
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+};
+
+
+export const markPartialPayment = async (req, res) => {
+  try {
+    const { userId, bookingId } = req.params;
+
+    const booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found"
+      });
+    }
+
+    // authorization check
+    if (booking.userId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized"
+      });
+    }
+
+    if (booking.completePayment) {
+      return res.status(400).json({
+        success: false,
+        message: "Already fully paid"
+      });
+    }
+
+    // 🔥 ONLY THIS CHANGE
+    booking.paymentStatus = "partial";
+
+    await booking.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment status updated to partial",
+      bookingId: booking._id,
+      paymentStatus: booking.paymentStatus
+    });
+
+  } catch (err) {
     return res.status(500).json({
       success: false,
       message: err.message

@@ -3,12 +3,12 @@ import mongoose from "mongoose";
 const feeConfigSchema = new mongoose.Schema({
   cleaningFee: {
     type: Number,
-    default: 200,
+    default: 0,
     required: true
   },
   serviceFee: {
     type: Number,
-    default: 100,
+    default: 0,
     required: true
   },
   isActive: {

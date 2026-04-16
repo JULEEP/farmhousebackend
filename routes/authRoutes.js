@@ -10,12 +10,16 @@ router.post("/verify-otp", UserController.verifyOtp);
 router.post("/reset-password", UserController.resetPassword);
 
 router.get("/getprofile/:userId", UserController.getProfile);
+router.put("/update/:userId", UserController.updateUser);
 
 router.put("/:userId/update", upload.single("profileImage"), UserController.updateProfile);
 router.delete("/delete-image/:userId", UserController.deleteProfileImage);
 
 router.delete("/delete-account/:userId", UserController.deleteAccount);
 router.get("/users", UserController.getAllUsers);
+
+
+router.delete("/delete/:userId", UserController.deleteUserAccount);
 
 router.post("/create-banner", upload.array("images", 10), UserController.createBanner);
 router.get("/all-banners", UserController.getAllBanners);

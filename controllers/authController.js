@@ -1428,3 +1428,55 @@ export const loginOrGuest = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+
+// ------------------------
+// UPDATE PROFILE
+// ------------------------
+export const updateUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const {
+      firstName,
+      lastName,
+      fullName,
+      gender,
+      email,
+      phoneNumber
+    } = req.body;
+
+    // find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // update only allowed fields
+    if (firstName !== undefined) user.firstName = firstName;
+    if (lastName !== undefined) user.lastName = lastName;
+    if (fullName !== undefined) user.fullName = fullName;
+    if (gender !== undefined) user.gender = gender;
+    if (email !== undefined) user.email = email;
+    if (phoneNumber !== undefined) user.phoneNumber = phoneNumber;
+
+    user.updatedAt = new Date();
+
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: "Profile updated successfully",
+      profile: user
+    });
+
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+};
